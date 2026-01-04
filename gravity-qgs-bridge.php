@@ -2,13 +2,13 @@
 /**
  * Plugin Name: Gravity QGS Bridge
  * Description: Receives Quick GravityScore submissions from the marketing site and stores/associates them in Gravity Hub.
- * Version: 0.2.0
+ * Version: 0.3.0
  * Author: GravityStack
  */
 
 if (!defined('ABSPATH')) exit;
 
-define('GS_QGS_BRIDGE_VERSION', '0.2.0');
+define('GS_QGS_BRIDGE_VERSION', '0.3.0');
 
 require_once __DIR__ . '/includes/class-db.php';
 

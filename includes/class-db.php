@@ -21,7 +21,7 @@ class GS_QGS_Bridge_DB {
 
     require_once ABSPATH . 'wp-admin/includes/upgrade.php';
 
-    // Note: submission_id unique enforces idempotency.
+    // submission_id unique enforces idempotency
     $sql = "CREATE TABLE {$table} (
       id BIGINT(20) UNSIGNED NOT NULL AUTO_INCREMENT,
       submission_id VARCHAR(64) NOT NULL,
@@ -36,6 +36,7 @@ class GS_QGS_Bridge_DB {
       traffic_grade CHAR(1) NULL,
 
       user_id BIGINT(20) UNSIGNED NULL,
+      associated_at DATETIME NULL,
       status VARCHAR(20) NOT NULL DEFAULT 'pending',
       attempts INT UNSIGNED NOT NULL DEFAULT 0,
       last_attempt_at DATETIME NULL,
@@ -49,7 +50,8 @@ class GS_QGS_Bridge_DB {
       KEY email_normalised (email_normalised),
       KEY user_id (user_id),
       KEY status (status),
-      KEY submitted_at (submitted_at)
+      KEY submitted_at (submitted_at),
+      KEY associated_at (associated_at)
     ) {$charset_collate};";
 
     dbDelta($sql);
@@ -61,6 +63,18 @@ class GS_QGS_Bridge_DB {
 
     $row = $wpdb->get_row(
       $wpdb->prepare("SELECT * FROM {$table} WHERE submission_id = %s LIMIT 1", $submission_id),
+      ARRAY_A
+    );
+
+    return $row ?: null;
+  }
+
+  public static function get_by_id(int $id): ?array {
+    global $wpdb;
+    $table = self::table_name();
+
+    $row = $wpdb->get_row(
+      $wpdb->prepare("SELECT * FROM {$table} WHERE id = %d LIMIT 1", $id),
       ARRAY_A
     );
 
@@ -94,29 +108,6 @@ class GS_QGS_Bridge_DB {
 
     $data = array_merge($defaults, $row);
 
-    // Format specifiers for safety.
-    $formats = [
-      '%s', // submission_id
-      '%s', // email_normalised
-      '%s', // name
-      '%s', // submitted_at
-      '%s', // scoring_version
-      '%s', // source
-      '%s', // gravityscore_grade
-      '%s', // strategy_grade
-      '%s', // funnel_grade
-      '%s', // traffic_grade
-
-      '%d', // user_id
-      '%s', // status
-      '%d', // attempts
-      '%s', // last_attempt_at
-      '%s', // last_error
-
-      '%s', // created_at
-      '%s', // updated_at
-    ];
-
     $ok = $wpdb->insert($table, [
       'submission_id'      => $data['submission_id'],
       'email_normalised'   => $data['email_normalised'],
@@ -137,7 +128,27 @@ class GS_QGS_Bridge_DB {
 
       'created_at'         => $data['created_at'],
       'updated_at'         => $data['updated_at'],
-    ], $formats);
+    ], [
+      '%s', // submission_id
+      '%s', // email_normalised
+      '%s', // name
+      '%s', // submitted_at
+      '%s', // scoring_version
+      '%s', // source
+      '%s', // gravityscore_grade
+      '%s', // strategy_grade
+      '%s', // funnel_grade
+      '%s', // traffic_grade
+
+      '%d', // user_id
+      '%s', // status
+      '%d', // attempts
+      '%s', // last_attempt_at
+      '%s', // last_error
+
+      '%s', // created_at
+      '%s', // updated_at
+    ]);
 
     if ($ok === false) {
       return [
@@ -150,5 +161,27 @@ class GS_QGS_Bridge_DB {
       'ok' => true,
       'id' => (int) $wpdb->insert_id,
     ];
+  }
+
+  public static function mark_associated(int $id, int $user_id): bool {
+    global $wpdb;
+    $table = self::table_name();
+
+    $now = gmdate('Y-m-d H:i:s');
+
+    $updated = $wpdb->update($table, [
+      'user_id'       => $user_id,
+      'status'        => self::STATUS_ASSOCIATED,
+      'associated_at' => $now,
+      'updated_at'    => $now,
+    ], [
+      'id' => $id,
+    ], [
+      '%d','%s','%s','%s'
+    ], [
+      '%d'
+    ]);
+
+    return ($updated !== false);
   }
 }

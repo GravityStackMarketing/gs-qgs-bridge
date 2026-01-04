@@ -30,6 +30,7 @@ class GS_QGS_Bridge_REST {
       ], 401);
     }
 
+    // 5-minute replay window
     $now = time();
     if (abs($now - (int) $timestamp) > 300) {
       return new WP_REST_Response([
@@ -38,6 +39,7 @@ class GS_QGS_Bridge_REST {
       ], 401);
     }
 
+    // Validate signature against the exact raw body.
     $raw_body = $request->get_body();
     $expected = hash_hmac('sha256', $timestamp . '.' . $raw_body, GS_QGS_SHARED_SECRET);
 
@@ -69,33 +71,34 @@ class GS_QGS_Bridge_REST {
     }
 
     // Normalise email: trim + lowercase only
-    $email_norm = strtolower($email_raw);
+    $email_norm = strtolower(trim($email_raw));
 
     // Optional fields
-    $name           = isset($payload['name']) ? trim((string) $payload['name']) : null;
-    $scoring_version= isset($payload['scoring_version']) ? trim((string) $payload['scoring_version']) : null;
-    $source         = isset($payload['source']) ? trim((string) $payload['source']) : null;
+    $name            = isset($payload['name']) ? trim((string) $payload['name']) : null;
+    $scoring_version = isset($payload['scoring_version']) ? trim((string) $payload['scoring_version']) : null;
+    $source          = isset($payload['source']) ? trim((string) $payload['source']) : null;
 
-    $gravityscore   = isset($payload['gravityscore_grade']) ? trim((string) $payload['gravityscore_grade']) : null;
-    $strategy       = isset($payload['strategy_grade']) ? trim((string) $payload['strategy_grade']) : null;
-    $funnel         = isset($payload['funnel_grade']) ? trim((string) $payload['funnel_grade']) : null;
-    $traffic        = isset($payload['traffic_grade']) ? trim((string) $payload['traffic_grade']) : null;
+    // Letter grades (A/B/C/D)
+    $gravityscore = isset($payload['gravityscore_grade']) ? trim((string) $payload['gravityscore_grade']) : null;
+    $strategy     = isset($payload['strategy_grade']) ? trim((string) $payload['strategy_grade']) : null;
+    $funnel       = isset($payload['funnel_grade']) ? trim((string) $payload['funnel_grade']) : null;
+    $traffic      = isset($payload['traffic_grade']) ? trim((string) $payload['traffic_grade']) : null;
 
     // --- Idempotency check ---
     $existing = GS_QGS_Bridge_DB::get_by_submission_id($submission_id);
     if ($existing) {
       return new WP_REST_Response([
-        'success' => true,
+        'success'   => true,
         'duplicate' => true,
-        'message' => 'Already received.',
-        'received' => [
+        'message'   => 'Already received.',
+        'received'  => [
           'submission_id' => $submission_id,
-          'email' => $email_norm,
+          'email'         => $email_norm,
         ],
       ], 200);
     }
 
-    // --- Insert ---
+    // --- Insert (initially pending; association may happen below) ---
     $insert = GS_QGS_Bridge_DB::insert_submission([
       'submission_id'      => $submission_id,
       'email_normalised'   => $email_norm,
@@ -119,14 +122,48 @@ class GS_QGS_Bridge_REST {
       ], 500);
     }
 
+    $insert_id = (int) ($insert['id'] ?? 0);
+
+    // --- Attempt association immediately ---
+    $associated = false;
+    $user_id = 0;
+
+    if ($insert_id > 0 && class_exists('GS_QGS_Bridge_Association')) {
+      $user_id = (int) GS_QGS_Bridge_Association::find_user_id_by_email($email_norm);
+
+      if ($user_id > 0) {
+        // Mark associated in DB
+        if (method_exists('GS_QGS_Bridge_DB', 'mark_associated')) {
+          GS_QGS_Bridge_DB::mark_associated($insert_id, $user_id);
+        }
+
+        // Update ACF latest snapshot (only if newer)
+        GS_QGS_Bridge_Association::maybe_update_acf_latest($user_id, [
+          'submission_id'      => $submission_id,
+          'submitted_at'       => $submitted_at,
+          'scoring_version'    => $scoring_version,
+          'source'             => $source,
+          'name'               => $name,
+          'gravityscore_grade' => $gravityscore,
+          'strategy_grade'     => $strategy,
+          'funnel_grade'       => $funnel,
+          'traffic_grade'      => $traffic,
+        ]);
+
+        $associated = true;
+      }
+    }
+
     return new WP_REST_Response([
-      'success' => true,
-      'duplicate' => false,
-      'message' => 'Stored.',
-      'received' => [
+      'success'    => true,
+      'duplicate'  => false,
+      'message'    => 'Stored.',
+      'received'   => [
         'submission_id' => $submission_id,
         'email'         => $email_norm,
       ],
+      'associated' => $associated,
+      'user_id'    => $user_id ?: null,
     ], 200);
   }
 }
