@@ -129,25 +129,9 @@ class GS_QGS_Bridge_DB {
       'created_at'         => $data['created_at'],
       'updated_at'         => $data['updated_at'],
     ], [
-      '%s', // submission_id
-      '%s', // email_normalised
-      '%s', // name
-      '%s', // submitted_at
-      '%s', // scoring_version
-      '%s', // source
-      '%s', // gravityscore_grade
-      '%s', // strategy_grade
-      '%s', // funnel_grade
-      '%s', // traffic_grade
-
-      '%d', // user_id
-      '%s', // status
-      '%d', // attempts
-      '%s', // last_attempt_at
-      '%s', // last_error
-
-      '%s', // created_at
-      '%s', // updated_at
+      '%s','%s','%s','%s','%s','%s','%s','%s','%s','%s',
+      '%d','%s','%d','%s','%s',
+      '%s','%s'
     ]);
 
     if ($ok === false) {
@@ -183,5 +167,114 @@ class GS_QGS_Bridge_DB {
     ]);
 
     return ($updated !== false);
+  }
+
+  public static function get_pending_by_email(string $email_norm, int $limit = 50): array {
+    global $wpdb;
+    $table = self::table_name();
+
+    return $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT * FROM {$table}
+         WHERE email_normalised = %s AND status = %s
+         ORDER BY submitted_at ASC, id ASC
+         LIMIT %d",
+        $email_norm,
+        self::STATUS_PENDING,
+        $limit
+      ),
+      ARRAY_A
+    ) ?: [];
+  }
+
+  public static function get_pending_batch(int $limit = 50): array {
+    global $wpdb;
+    $table = self::table_name();
+
+    return $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT * FROM {$table}
+         WHERE status = %s
+         ORDER BY last_attempt_at IS NULL DESC, last_attempt_at ASC, submitted_at ASC, id ASC
+         LIMIT %d",
+        self::STATUS_PENDING,
+        $limit
+      ),
+      ARRAY_A
+    ) ?: [];
+  }
+
+  public static function bump_attempt(int $id, ?string $error = null): bool {
+    global $wpdb;
+    $table = self::table_name();
+
+    $now = gmdate('Y-m-d H:i:s');
+
+    $updated = $wpdb->query(
+      $wpdb->prepare(
+        "UPDATE {$table}
+         SET attempts = attempts + 1,
+             last_attempt_at = %s,
+             last_error = %s,
+             updated_at = %s
+         WHERE id = %d",
+        $now,
+        $error,
+        $now,
+        $id
+      )
+    );
+
+    return ($updated !== false);
+  }
+
+  public static function mark_failed(int $id, string $error): bool {
+    global $wpdb;
+    $table = self::table_name();
+
+    $now = gmdate('Y-m-d H:i:s');
+
+    $updated = $wpdb->update($table, [
+      'status'     => self::STATUS_FAILED,
+      'last_error' => $error,
+      'updated_at' => $now,
+    ], [
+      'id' => $id,
+    ], [
+      '%s','%s','%s'
+    ], [
+      '%d'
+    ]);
+
+    return ($updated !== false);
+  }
+
+  public static function counts(): array {
+    global $wpdb;
+    $table = self::table_name();
+
+    $total      = (int) $wpdb->get_var("SELECT COUNT(*) FROM {$table}");
+    $pending    = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE status = %s", self::STATUS_PENDING));
+    $associated = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE status = %s", self::STATUS_ASSOCIATED));
+    $failed     = (int) $wpdb->get_var($wpdb->prepare("SELECT COUNT(*) FROM {$table} WHERE status = %s", self::STATUS_FAILED));
+
+    return compact('total','pending','associated','failed');
+  }
+
+  public static function get_all_by_email(string $email_norm, int $limit = 50): array {
+    global $wpdb;
+    $table = self::table_name();
+
+    return $wpdb->get_results(
+      $wpdb->prepare(
+        "SELECT * FROM {$table}
+         WHERE email_normalised = %s
+         ORDER BY submitted_at DESC, id DESC
+         LIMIT %d",
+        $email_norm,
+        $limit
+      ),
+      ARRAY_A
+    ) ?: [];
   }
 }
