@@ -147,27 +147,30 @@ class GS_QGS_Bridge_DB {
     ];
   }
 
-  public static function mark_associated(int $id, int $user_id): bool {
-    global $wpdb;
-    $table = self::table_name();
+ public static function mark_associated(int $id, int $user_id): bool {
+  global $wpdb;
+  $table = self::table_name();
 
-    $now = gmdate('Y-m-d H:i:s');
+  $now = gmdate('Y-m-d H:i:s');
 
-    $updated = $wpdb->update($table, [
-      'user_id'       => $user_id,
-      'status'        => self::STATUS_ASSOCIATED,
-      'associated_at' => $now,
-      'updated_at'    => $now,
-    ], [
-      'id' => $id,
-    ], [
-      '%d','%s','%s','%s'
-    ], [
-      '%d'
-    ]);
+  $updated = $wpdb->update($table, [
+    'user_id'         => $user_id,
+    'status'          => self::STATUS_ASSOCIATED,
+    'associated_at'   => $now,
+    'last_attempt_at' => $now,
+    'last_error'      => null,
+    'updated_at'      => $now,
+  ], [
+    'id' => $id,
+  ], [
+    '%d','%s','%s','%s','%s','%s'
+  ], [
+    '%d'
+  ]);
 
-    return ($updated !== false);
-  }
+  return ($updated !== false);
+}
+
 
   public static function get_pending_by_email(string $email_norm, int $limit = 50): array {
     global $wpdb;
